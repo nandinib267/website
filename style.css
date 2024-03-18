@@ -61,13 +61,13 @@ body {
   }
 
   .social-icons {
-    text-align: center; /* Center the block of icons horizontally */
-    margin-top: 100px;
+    text-align: center;
   }
   
   .social-icons a {
-    display: inline-block; /* Display icons as inline blocks */
-    margin: 0 10px; /* Adjust spacing between icons */
+    display: inline-block; 
+    margin: 0 10px; 
+    padding-bottom: 2%;
   }
 
 .social-icons img {
@@ -90,6 +90,10 @@ footer{
   justify-content: center; 
   align-items: center;
   padding: 5px;
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 100%;
 }
 
 footer p {
