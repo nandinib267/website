@@ -65,57 +65,122 @@
   <script>
     const urlPrefix = "Grad Entrance Prep Notes/";
     let scale = 1.3;
+    let currentTask = null; // Store current PDF task to destroy on switch
+    let currentRenderId = 0; // Unique ID to track the current render cycle
 
     // Specify the worker src
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
     function loadPdf(fileName) {
+      // Destroy previous loading task if it exists
+      if (currentTask !== null) {
+        currentTask.destroy();
+      }
+      
+      currentRenderId++;
+      let renderId = currentRenderId;
+
       let url = urlPrefix + fileName;
       const container = document.querySelector('.pdf-viewer');
 
       // Show loading text
-      container.innerHTML = '<p style="font-family: \'Roboto Slab\', serif; color: #545863; margin-top: 50px;">Loading PDF...</p>';
+      container.innerHTML = '<p style="font-family: \'Roboto Slab\', serif; color: #545863; text-align: center; margin-top: 50px;">Loading PDF... Please wait.</p>';
 
-      pdfjsLib.getDocument(url).promise.then(function (pdfDoc) {
+      currentTask = pdfjsLib.getDocument(url);
+      
+      currentTask.promise.then(function (pdfDoc) {
+        if (renderId !== currentRenderId) return;
+
         container.innerHTML = ''; // Clear loading text
         const numPages = pdfDoc.numPages;
 
-        // Render pages sequentially to avoid overloading memory
-        let renderNextPage = function (pageNum) {
-          if (pageNum > numPages) return;
+        // Get the first page to determine typical layout dimensions
+        pdfDoc.getPage(1).then(function(firstPage) {
+            if (renderId !== currentRenderId) return;
 
-          pdfDoc.getPage(pageNum).then(function (page) {
-            let viewport = page.getViewport({ scale: scale });
-            let canvas = document.createElement('canvas');
+            let viewport = firstPage.getViewport({ scale: scale });
+            let defaultHeight = viewport.height;
+            let defaultWidth = viewport.width;
 
-            // Disable right click to deter download
-            canvas.oncontextmenu = () => false;
+            const pagePlaceholders = [];
 
-            canvas.style.display = 'block';
-            canvas.style.marginBottom = '20px';
-            canvas.style.border = '1px solid #ccc';
-            canvas.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)';
-            canvas.style.maxWidth = '100%';
+            // Add placeholders for all pages to allow scrolling
+            for (let i = 1; i <= numPages; i++) {
+                let placeholder = document.createElement('div');
+                placeholder.className = 'page-placeholder';
+                placeholder.style.height = defaultHeight + 'px';
+                placeholder.style.width = defaultWidth + 'px';
+                placeholder.style.margin = '0 auto 20px auto';
+                placeholder.style.background = '#f9f9f9';
+                placeholder.style.border = '1px solid #ccc';
+                placeholder.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)';
+                placeholder.style.position = 'relative';
+                // Show a small loader text centered
+                let loadingText = document.createElement('div');
+                loadingText.innerText = 'Loading Page ' + i + '...';
+                loadingText.style.position = 'absolute';
+                loadingText.style.top = '50%';
+                loadingText.style.left = '50%';
+                loadingText.style.transform = 'translate(-50%, -50%)';
+                loadingText.style.fontFamily = "'Roboto Slab', serif";
+                loadingText.style.color = '#aaa'; // Light gray text
+                placeholder.appendChild(loadingText);
 
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-            container.appendChild(canvas);
+                placeholder.dataset.pageNumber = i;
+                container.appendChild(placeholder);
+                pagePlaceholders.push(placeholder);
+            }
 
-            let renderContext = {
-              canvasContext: canvas.getContext('2d'),
-              viewport: viewport
-            };
+            // Set up Intersection Observer for lazy rendering
+            let observer = new IntersectionObserver((entries, obs) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        let placeholder = entry.target;
+                        let pageNum = parseInt(placeholder.dataset.pageNumber);
+                        
+                        // Stop observing this placeholder
+                        obs.unobserve(placeholder);
 
-            page.render(renderContext).promise.then(function () {
-              // Once finished rendering, queue the next page
-              renderNextPage(pageNum + 1);
-            });
-          });
-        };
+                        // Render the page on demand
+                        pdfDoc.getPage(pageNum).then(function(page) {
+                            if (renderId !== currentRenderId) return;
 
-        renderNextPage(1); // Start rendering from page 1
+                            let specificViewport = page.getViewport({ scale: scale });
+                            placeholder.style.height = specificViewport.height + 'px';
+                            placeholder.style.width = specificViewport.width + 'px';
+                            placeholder.innerHTML = ''; // Remove loading text
+                            placeholder.style.background = 'transparent';
+
+                            let canvas = document.createElement('canvas');
+                            canvas.oncontextmenu = () => false; // disable right click
+                            canvas.style.display = 'block';
+                            canvas.style.maxWidth = '100%';
+                            canvas.height = specificViewport.height;
+                            canvas.width = specificViewport.width;
+                            
+                            placeholder.appendChild(canvas);
+
+                            let renderContext = {
+                              canvasContext: canvas.getContext('2d'),
+                              viewport: specificViewport
+                            };
+
+                            page.render(renderContext);
+                        });
+                    }
+                });
+            }, { root: null, rootMargin: '800px 0px' }); // Render pages just before they scroll into view
+
+            // Start observing all placeholders
+            pagePlaceholders.forEach(ph => observer.observe(ph));
+        });
+
       }).catch(function (err) {
-        container.innerHTML = '<p style="font-family: \'Roboto Slab\', serif; color: red;">Error loading PDF.</p>';
+        // If task was destroyed (due to fast switching), ignore the error
+        if (err.name === 'AbortException') return; 
+        
+        if (renderId !== currentRenderId) return;
+        container.innerHTML = '<p style="font-family: \'Roboto Slab\', serif; color: red; text-align: center;">Error loading PDF.</p>';
         console.error('Error loading PDF: ', err);
       });
     }
